@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: CRBS to Zoho Flow Bridge
- * Plugin URI: https://example.com/crbs-zoho-flow-bridge
- * Description: Serializes QuanticaLabs CRBS booking data and sends to Zoho Flow webhook
+ * Plugin Name: Zoho Flow Connect
+ * Plugin URI: https://github.com/codebyshoaib/zoho-flow-connect
+ * Description: Connects QuanticaLabs CRBS to Zoho Flow using webhooks
  * Version: 1.0.0
  * Author: Shoaib Ud Din
  * Author URI: https://github.com/codebyshoaib
@@ -45,8 +45,29 @@ function zoho_connect_serializer_init() {
 	$autoloader = new \ZohoConnectSerializer\Includes\Autoloader();
 	$autoloader->register();
 	
+	// Initialize plugin updater (check for updates from GitHub)
+	zoho_connect_serializer_init_updater();
+	
 	$plugin = \ZohoConnectSerializer\Core\Plugin::get_instance();
 	$plugin->run();
+}
+
+/**
+ * Initialize plugin updater
+ * 
+ * Configure this with your GitHub username and repository name.
+ * Updates will be pulled from GitHub releases (tags).
+ */
+function zoho_connect_serializer_init_updater() {
+	$github_username = 'codebyshoaib'; 
+	$github_repo     = 'zoho-connect'; 
+	
+	$updater = new \ZohoConnectSerializer\Infrastructure\Updater\PluginUpdater(
+		__FILE__,
+		$github_username,
+		$github_repo
+	);
+	$updater->init();
 }
 
 // Initialize plugin on plugins_loaded hook

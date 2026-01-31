@@ -19,3 +19,4 @@ node_modules/
 # Build files
 *.zip
 *.tar.gz
+plugin-update-checker-temp.zip
