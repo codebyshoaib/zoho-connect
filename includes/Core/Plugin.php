@@ -72,6 +72,14 @@ class Plugin {
 			return new \ZohoConnectSerializer\Infrastructure\Logging\Logger();
 		} );
 
+		// Debug Service
+		$this->container->bind( 'debug_service', function() {
+			return new \ZohoConnectSerializer\Infrastructure\Debug\DebugService(
+				$this->container->make( 'config' ),
+				$this->container->make( 'logger' )
+			);
+		} );
+
 		// API Router
 		$this->container->bind( 'api_router', function() {
 			return new \ZohoConnectSerializer\Infrastructure\API\Router(
@@ -119,6 +127,14 @@ class Plugin {
 			);
 		} );
 
+		// CRBS Integration
+		$this->container->bind( 'crbs_integration', function() {
+			return new \ZohoConnectSerializer\Domain\CRBS\Integrations\CRBSIntegration(
+				$this->container->make( 'booking_service' ),
+				$this->container->make( 'logger' )
+			);
+		} );
+
 		// API Controllers
 		$this->container->bind( 'booking_controller', function() {
 			return new \ZohoConnectSerializer\Infrastructure\API\Controllers\BookingController(
@@ -132,6 +148,9 @@ class Plugin {
 	 * Register WordPress hooks
 	 */
 	private function register_hooks() {
+		// Initialize CRBS integration (must be on plugins_loaded)
+		$this->hook_manager->add_action( 'plugins_loaded', array( $this, 'init_crbs_integration' ), 20 );
+
 		// Register REST API routes
 		$this->hook_manager->add_action( 'rest_api_init', array( $this, 'register_rest_routes' ) );
 
@@ -140,6 +159,14 @@ class Plugin {
 			$this->hook_manager->add_action( 'admin_menu', array( $this, 'register_admin_menu' ) );
 			$this->hook_manager->add_action( 'admin_init', array( $this, 'register_admin_settings' ) );
 		}
+	}
+
+	/**
+	 * Initialize CRBS integration
+	 */
+	public function init_crbs_integration() {
+		$integration = $this->container->make( 'crbs_integration' );
+		$integration->init();
 	}
 
 	/**

@@ -110,4 +110,46 @@ class BookingService {
 			);
 		}
 	}
+
+	/**
+	 * Process CRBS booking
+	 *
+	 * @param int   $booking_id Booking post ID
+	 * @param array $booking CRBS booking data
+	 * @return array
+	 */
+	public function process_crbs_booking( $booking_id, array $booking ) {
+		try {
+			// Serialize CRBS booking for Zoho Flow
+			$serialized = $this->serialization_service->serialize_crbs_booking( $booking_id, $booking );
+
+			// For now, just output/debug (webhook sending will be enabled later)
+			$debug_service = \ZohoConnectSerializer\Core\Plugin::get_instance()
+				->get_container()
+				->make( 'debug_service' );
+
+			$debug_service->output_payload( $serialized, $booking_id );
+
+			$this->logger->info( 'CRBS booking processed', array(
+				'booking_id' => $booking_id,
+				'payload_keys' => array_keys( $serialized ),
+			) );
+
+			return array(
+				'success' => true,
+				'payload' => $serialized,
+			);
+
+		} catch ( \Exception $e ) {
+			$this->logger->error( 'Error processing CRBS booking', array(
+				'booking_id' => $booking_id,
+				'error' => $e->getMessage(),
+			) );
+
+			return array(
+				'success' => false,
+				'error'   => $e->getMessage(),
+			);
+		}
+	}
 }

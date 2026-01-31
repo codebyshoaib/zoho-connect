@@ -1,22 +1,22 @@
 <?php
 /**
- * Plugin Name: Zoho Connect Serializer
- * Plugin URI: https://example.com/zoho-connect-serializer
- * Description: Serializes payloads from Quantica Labs booking plugin and sends to Zoho Flow via webhook
+ * Plugin Name: CRBS → Zoho Flow Bridge
+ * Plugin URI: https://example.com/crbs-zoho-flow-bridge
+ * Description: Serializes QuanticaLabs CRBS booking data and sends to Zoho Flow webhook
  * Version: 1.0.0
  * Author: Your Name
  * Author URI: https://example.com
  * License: GPL-2.0+
  * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
- * Text Domain: zoho-connect-serializer
+ * Text Domain: crbs-zoho-flow-bridge
  * Domain Path: /languages
  * Requires at least: 5.8
  * Requires PHP: 7.4
  */
 
 // If this file is called directly, abort.
-if ( ! defined( 'WPINC' ) ) {
-	die;
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
 }
 
 /**
@@ -31,6 +31,12 @@ define( 'ZOHO_CONNECT_SERIALIZER_PLUGIN_BASENAME', plugin_basename( __FILE__ ) )
  * Autoloader
  */
 require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Autoloader.php';
+
+/**
+ * Load core classes needed for activation/deactivation
+ */
+require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Activator.php';
+require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Deactivator.php';
 
 /**
  * Initialize the plugin
@@ -50,12 +56,22 @@ add_action( 'plugins_loaded', 'zoho_connect_serializer_init' );
  * Activation hook
  */
 register_activation_hook( __FILE__, function() {
-	\ZohoConnectSerializer\Core\Activator::activate();
+	if ( class_exists( 'ZohoConnectSerializer\Core\Activator' ) ) {
+		\ZohoConnectSerializer\Core\Activator::activate();
+	} else {
+		// Fallback: just flush rewrite rules if class not found
+		flush_rewrite_rules();
+	}
 } );
 
 /**
  * Deactivation hook
  */
 register_deactivation_hook( __FILE__, function() {
-	\ZohoConnectSerializer\Core\Deactivator::deactivate();
+	if ( class_exists( 'ZohoConnectSerializer\Core\Deactivator' ) ) {
+		\ZohoConnectSerializer\Core\Deactivator::deactivate();
+	} else {
+		// Fallback: just flush rewrite rules if class not found
+		flush_rewrite_rules();
+	}
 } );

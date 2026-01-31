@@ -33,6 +33,7 @@ class Config {
 		'request_timeout'        => 30,
 		'retry_attempts'         => 3,
 		'retry_delay'            => 5,
+		'debug_output_method'    => 'console', // console, admin_page, both
 	);
 
 	/**

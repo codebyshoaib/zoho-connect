@@ -35,20 +35,37 @@ class AdminPage {
 	 */
 	public function register() {
 		add_menu_page(
-			__( 'Zoho Connect Serializer', 'zoho-connect-serializer' ),
-			__( 'Zoho Connect', 'zoho-connect-serializer' ),
+			__( 'CRBS → Zoho Flow Bridge', 'crbs-zoho-flow-bridge' ),
+			__( 'Zoho Flow Bridge', 'crbs-zoho-flow-bridge' ),
 			'manage_options',
-			'zoho-connect-serializer',
-			array( $this, 'render_page' ),
+			'crbs-zoho-flow-bridge',
+			array( $this, 'render_settings_page' ),
 			'dashicons-admin-generic',
 			30
+		);
+
+		// Add submenu for debug view
+		add_submenu_page(
+			'crbs-zoho-flow-bridge',
+			__( 'View Payloads', 'crbs-zoho-flow-bridge' ),
+			__( 'View Payloads', 'crbs-zoho-flow-bridge' ),
+			'manage_options',
+			'crbs-zoho-flow-bridge-payloads',
+			array( $this, 'render_payloads_page' )
 		);
 	}
 
 	/**
-	 * Render admin page
+	 * Render settings page
 	 */
-	public function render_page() {
+	public function render_settings_page() {
 		include ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'templates/admin/settings-page.php';
+	}
+
+	/**
+	 * Render payloads debug page
+	 */
+	public function render_payloads_page() {
+		include ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'templates/admin/payloads-page.php';
 	}
 }

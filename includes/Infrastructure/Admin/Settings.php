@@ -34,31 +34,7 @@ class Settings {
 	 * Register settings
 	 */
 	public function register() {
-		register_setting(
-			'zoho_connect_serializer_settings',
-			'zoho_connect_serializer_zoho_flow_webhook_url',
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => 'esc_url_raw',
-			)
-		);
-
-		register_setting(
-			'zoho_connect_serializer_settings',
-			'zoho_connect_serializer_enable_logging',
-			array(
-				'type'              => 'boolean',
-				'sanitize_callback' => 'rest_sanitize_boolean',
-			)
-		);
-
-		register_setting(
-			'zoho_connect_serializer_settings',
-			'zoho_connect_serializer_log_level',
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => 'sanitize_text_field',
-			)
-		);
+		// Settings are now handled directly in the admin page template
+		// This method is kept for future use if needed
 	}
 }
