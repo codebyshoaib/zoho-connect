@@ -181,6 +181,7 @@ $bookings = new \WP_Query( $args );
 	
 	if ( $recent_bookings->have_posts() ) :
 		$status_names = array(
+			0 => 'Not set / Unknown',
 			1 => 'Pending (new)',
 			2 => 'Processing (accepted)',
 			3 => 'Cancelled (rejected)',
@@ -219,25 +220,27 @@ $bookings = new \WP_Query( $args );
 						$status_name = 'Unknown';
 						
 						if ( $booking && is_array( $booking ) ) {
-							$status_id = (int) ( $booking['meta'][ $context . '_booking_status_id' ] ?? 0 );
-							$status_name = $status_names[ $status_id ] ?? 'Unknown (' . $status_id . ')';
+							$status_id = (int) ( $booking['meta'][ $context . '_booking_status_id' ] 
+								?? $booking['meta']['booking_status_id'] 
+								?? 0 );
+							$status_name = $status_names[ $status_id ] ?? ( $status_id === 0 ? 'Not set / Unknown' : 'Unknown (' . $status_id . ')' );
 						}
 						
-						// Check if status is allowed
-						$allowed_statuses = apply_filters( 'qzb_allowed_booking_statuses', array( 2, 4 ) );
-						$allow_all = apply_filters( 'qzb_allow_all_booking_statuses', false );
-						$status_allowed = $allow_all || in_array( $status_id, $allowed_statuses, true );
+						// Check if status is allowed (default: all statuses allowed, including 0)
+						$allowed_statuses = apply_filters( 'qzb_allowed_booking_statuses', array() );
+						$allow_all = apply_filters( 'qzb_allow_all_booking_statuses', true );
+						$status_allowed = $allow_all || empty( $allowed_statuses ) || in_array( $status_id, $allowed_statuses, true );
 						
 						$why_not = '';
 						if ( ! $processed ) {
-							if ( ! $status_allowed ) {
+							if ( ! $status_allowed && ! empty( $allowed_statuses ) ) {
 								$why_not = sprintf( 
 									esc_html__( 'Status %d not in allowed list [%s]', 'crbs-zoho-flow-bridge' ),
 									$status_id,
 									implode( ', ', $allowed_statuses )
 								);
 							} else {
-								$why_not = esc_html__( 'Not processed yet (may need to save booking again)', 'crbs-zoho-flow-bridge' );
+								$why_not = esc_html__( 'Not processed yet (processing scheduled or in progress)', 'crbs-zoho-flow-bridge' );
 							}
 						}
 						?>

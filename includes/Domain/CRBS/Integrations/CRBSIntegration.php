@@ -75,6 +75,9 @@ class CRBSIntegration {
 		
 		// Register scheduled event handler
 		add_action( 'qzb_process_booking', array( $this, 'process_scheduled_booking' ), 10, 1 );
+		
+		// Use shutdown hook as a fallback to process after everything is saved
+		add_action( 'shutdown', array( $this, 'process_pending_bookings' ), 10 );
 
 		$this->logger->info( 'CRBS integration initialized', array(
 			'cpt_name' => $this->cpt_name,
@@ -123,27 +126,9 @@ class CRBSIntegration {
 		}
 		// For new bookings ($update = false), always process even if meta exists
 		
-		// Try to load booking immediately to check if data is available
-		$Booking = new \CRBSBooking();
-		$booking = $Booking->getBooking( $post_id );
-		
-		if ( $booking && is_array( $booking ) ) {
-			$meta = $booking['meta'] ?? array();
-			// Check if essential data is available
-			$has_essential_data = ! empty( $meta['pickup_datetime'] ) || ! empty( $meta['price_initial_value'] ) || ! empty( $meta['vehicle_id'] );
-			
-			if ( $has_essential_data ) {
-				// Data is ready, process immediately
-				$this->logger->info( 'Booking data available immediately, processing now', array( 'post_id' => $post_id ) );
-				$this->process_booking_immediately( $post_id, $booking );
-				return;
-			}
-		}
-		
-		// Data not ready yet, schedule processing with a delay
-		$this->logger->info( 'Booking data not ready, scheduling delayed processing', array( 'post_id' => $post_id ) );
-		$this->schedule_booking_processing( $post_id );
-		return;
+		// Add to pending list to process on shutdown (after CRBS has saved everything)
+		$this->pending_bookings[] = $post_id;
+		$this->logger->info( 'Added booking to pending list for shutdown processing', array( 'post_id' => $post_id ) );
 	}
 
 	/**
@@ -173,6 +158,10 @@ class CRBSIntegration {
 		if ( ! wp_next_scheduled( 'qzb_process_booking', array( $post_id ) ) ) {
 			wp_schedule_single_event( time() + 3, 'qzb_process_booking', array( $post_id ) );
 			$this->logger->info( 'Scheduled booking processing', array( 'post_id' => $post_id ) );
+			
+			// Trigger WordPress cron immediately if possible (for faster processing)
+			// This helps process bookings faster without waiting for the next cron run
+			spawn_cron();
 		}
 	}
 
@@ -183,19 +172,25 @@ class CRBSIntegration {
 	 * @param array $booking Booking data
 	 */
 	private function process_booking_immediately( $post_id, array $booking ) {
-		// Get booking status
+		// Get booking status - try multiple possible field names
 		$context = defined( 'PLUGIN_CRBS_CONTEXT' ) ? PLUGIN_CRBS_CONTEXT : 'crbs';
-		$status_id = (int) ( $booking['meta'][ $context . '_booking_status_id' ] ?? $booking['meta']['booking_status_id'] ?? 0 );
+		$status_id = (int) ( $booking['meta'][ $context . '_booking_status_id' ] 
+			?? $booking['meta']['booking_status_id'] 
+			?? $booking['meta'][ $context . '_status_id' ]
+			?? $booking['meta']['status_id']
+			?? 0 );
 		
-		// Process ALL booking statuses by default
+		// Process ALL booking statuses by default (including status 0/unknown)
 		$allowed_statuses = apply_filters( 'qzb_allowed_booking_statuses', array() );
 		$allow_all_statuses = apply_filters( 'qzb_allow_all_booking_statuses', true );
 
 		// Only filter by status if explicitly configured
+		// If allow_all is true OR allowed_statuses is empty, process everything (including status 0)
 		if ( ! $allow_all_statuses && ! empty( $allowed_statuses ) && ! in_array( $status_id, $allowed_statuses, true ) ) {
 			$this->logger->debug( 'Booking status not allowed', array(
 				'post_id' => $post_id,
 				'status_id' => $status_id,
+				'status_name' => $this->get_status_name( $status_id ),
 			) );
 			return;
 		}
@@ -349,6 +344,51 @@ class CRBSIntegration {
 	}
 
 	/**
+	 * Process pending bookings on shutdown (after CRBS has saved everything)
+	 */
+	public function process_pending_bookings() {
+		if ( empty( $this->pending_bookings ) ) {
+			return;
+		}
+
+		foreach ( $this->pending_bookings as $post_id ) {
+			// Skip if already processed
+			$sent = get_post_meta( $post_id, '_qzb_sent_to_zoho', true );
+			if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) ) {
+				continue;
+			}
+
+			$post = get_post( $post_id );
+			if ( ! $post || $post->post_status !== 'publish' ) {
+				continue;
+			}
+
+			// Load booking via CRBS
+			$Booking = new \CRBSBooking();
+			$booking = $Booking->getBooking( $post_id );
+
+			if ( ! $booking || ! is_array( $booking ) ) {
+				$this->logger->warning( 'Could not load booking on shutdown', array( 'post_id' => $post_id ) );
+				continue;
+			}
+
+			$meta = $booking['meta'] ?? array();
+			$has_essential_data = ! empty( $meta['pickup_datetime'] ) || ! empty( $meta['price_initial_value'] ) || ! empty( $meta['vehicle_id'] );
+
+			if ( $has_essential_data ) {
+				$this->logger->info( 'Processing booking on shutdown', array( 'post_id' => $post_id ) );
+				$this->process_booking_immediately( $post_id, $booking );
+			} else {
+				// Still not ready, schedule for later
+				$this->schedule_booking_processing( $post_id );
+			}
+		}
+
+		// Clear pending list
+		$this->pending_bookings = array();
+	}
+
+	/**
 	 * Get status name by ID
 	 *
 	 * @param int $status_id Status ID
@@ -356,6 +396,7 @@ class CRBSIntegration {
 	 */
 	private function get_status_name( $status_id ) {
 		$statuses = array(
+			0 => 'Not set / Unknown',
 			1 => 'Pending (new)',
 			2 => 'Processing (accepted)',
 			3 => 'Cancelled (rejected)',
