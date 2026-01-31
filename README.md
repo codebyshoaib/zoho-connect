@@ -1,4 +1,4 @@
-# CRBS → Zoho Flow Bridge
+# Zoho Flow Connect
 
 A WordPress plugin that serializes QuanticaLabs CRBS booking data and sends to Zoho Flow webhook. Currently in **debug mode** - payloads are output to console/admin page for testing.
 
