@@ -1,0 +1,21 @@
+# WordPress
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Dependencies
+vendor/
+node_modules/
+
+# Build files
+*.zip
+*.tar.gz
