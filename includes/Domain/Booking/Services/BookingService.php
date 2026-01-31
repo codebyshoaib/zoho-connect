@@ -141,7 +141,7 @@ class BookingService {
 			);
 
 		} catch ( \Exception $e ) {
-			$this->logger->error( 'Error processing CRBS booking', array(
+			$this->logger->error( 'Error processing CRBS booking ' . $booking_id, array(
 				'booking_id' => $booking_id,
 				'error' => $e->getMessage(),
 			) );
