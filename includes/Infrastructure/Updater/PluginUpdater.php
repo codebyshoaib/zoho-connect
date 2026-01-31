@@ -102,10 +102,16 @@ class PluginUpdater {
 
 			// Optional: Set branch (defaults to 'master' or 'main')
 			// $this->update_checker->setBranch('main');
+			
+			// Debug: Log successful initialization
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( 'Zoho Connect Updater: Successfully initialized for ' . $github_url );
+			}
 		} catch ( \Exception $e ) {
-			// Silently fail - update checker not critical for plugin functionality
+			// Log error for debugging
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 				error_log( 'Zoho Connect Updater Error: ' . $e->getMessage() );
+				error_log( 'Zoho Connect Updater Stack: ' . $e->getTraceAsString() );
 			}
 			return;
 		}

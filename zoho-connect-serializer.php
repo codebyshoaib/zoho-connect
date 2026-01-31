@@ -39,6 +39,11 @@ require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Activator.php';
 require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Deactivator.php';
 
 /**
+ * Store updater instance globally to prevent garbage collection
+ */
+$GLOBALS['zoho_connect_serializer_updater'] = null;
+
+/**
  * Initialize plugin updater
  * 
  * Configure this with your GitHub username and repository name.
@@ -56,6 +61,9 @@ function zoho_connect_serializer_init_updater() {
 		$github_repo
 	);
 	$updater->init();
+	
+	// Store instance globally to prevent garbage collection
+	$GLOBALS['zoho_connect_serializer_updater'] = $updater;
 }
 
 /**
@@ -69,11 +77,11 @@ function zoho_connect_serializer_init() {
 	$plugin->run();
 }
 
-// Initialize updater early - must run before WordPress checks for updates
-add_action( 'init', 'zoho_connect_serializer_init_updater', 0 );
+// Initialize updater early on plugins_loaded - must run before WordPress checks for updates
+add_action( 'plugins_loaded', 'zoho_connect_serializer_init_updater', 1 );
 
 // Initialize plugin on plugins_loaded hook
-add_action( 'plugins_loaded', 'zoho_connect_serializer_init' );
+add_action( 'plugins_loaded', 'zoho_connect_serializer_init', 20 );
 
 /**
  * Activation hook
