@@ -38,7 +38,7 @@ class PluginUpdater {
 	/**
 	 * Update checker instance
 	 *
-	 * @var \Puc_v5p0_Plugin_UpdateChecker
+	 * @var \YahnisElsts\PluginUpdateChecker\v5p6\Plugin\UpdateChecker
 	 */
 	private $update_checker;
 
@@ -60,8 +60,8 @@ class PluginUpdater {
 	 */
 	public function init() {
 		// Check if Plugin Update Checker is available
-		if ( ! class_exists( '\Puc_v5p0_Plugin_UpdateChecker' ) ) {
-			// Try to load from vendor directory
+		if ( ! class_exists( '\YahnisElsts\PluginUpdateChecker\v5\PucFactory' ) ) {
+			// Try to load from vendor directory (Composer)
 			$update_checker_path = ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'vendor/yahnis-elsts/plugin-update-checker/plugin-update-checker.php';
 			
 			if ( file_exists( $update_checker_path ) ) {
@@ -84,8 +84,8 @@ class PluginUpdater {
 			$this->github_repo
 		);
 
-		// Initialize the update checker
-		$this->update_checker = \Puc_v5p0_Factory::buildUpdateChecker(
+		// Initialize the update checker using the namespaced factory
+		$this->update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
 			$github_url,
 			$this->plugin_file,
 			ZOHO_CONNECT_SERIALIZER_PLUGIN_BASENAME
@@ -101,7 +101,7 @@ class PluginUpdater {
 	/**
 	 * Get update checker instance
 	 *
-	 * @return \Puc_v5p0_Plugin_UpdateChecker|null
+	 * @return \YahnisElsts\PluginUpdateChecker\v5p6\Plugin\UpdateChecker|null
 	 */
 	public function get_update_checker() {
 		return $this->update_checker;
