@@ -1,11 +1,11 @@
 <?php
 /**
- * Plugin Name: CRBS → Zoho Flow Bridge
+ * Plugin Name: CRBS to Zoho Flow Bridge
  * Plugin URI: https://example.com/crbs-zoho-flow-bridge
  * Description: Serializes QuanticaLabs CRBS booking data and sends to Zoho Flow webhook
  * Version: 1.0.0
- * Author: Your Name
- * Author URI: https://example.com
+ * Author: Shoaib Ud Din
+ * Author URI: https://github.com/codebyshoaib
  * License: GPL-2.0+
  * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain: crbs-zoho-flow-bridge
