@@ -39,24 +39,12 @@ require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Activator.php';
 require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Deactivator.php';
 
 /**
- * Initialize the plugin
- */
-function zoho_connect_serializer_init() {
-	$autoloader = new \ZohoConnectSerializer\Includes\Autoloader();
-	$autoloader->register();
-	
-	// Initialize plugin updater (check for updates from GitHub)
-	zoho_connect_serializer_init_updater();
-	
-	$plugin = \ZohoConnectSerializer\Core\Plugin::get_instance();
-	$plugin->run();
-}
-
-/**
  * Initialize plugin updater
  * 
  * Configure this with your GitHub username and repository name.
  * Updates will be pulled from GitHub releases (tags).
+ * 
+ * Note: Update checker must be initialized early, before WordPress checks for updates.
  */
 function zoho_connect_serializer_init_updater() {
 	$github_username = 'codebyshoaib'; 
@@ -69,6 +57,20 @@ function zoho_connect_serializer_init_updater() {
 	);
 	$updater->init();
 }
+
+/**
+ * Initialize the plugin
+ */
+function zoho_connect_serializer_init() {
+	$autoloader = new \ZohoConnectSerializer\Includes\Autoloader();
+	$autoloader->register();
+	
+	$plugin = \ZohoConnectSerializer\Core\Plugin::get_instance();
+	$plugin->run();
+}
+
+// Initialize updater early - must run before WordPress checks for updates
+add_action( 'init', 'zoho_connect_serializer_init_updater', 0 );
 
 // Initialize plugin on plugins_loaded hook
 add_action( 'plugins_loaded', 'zoho_connect_serializer_init' );

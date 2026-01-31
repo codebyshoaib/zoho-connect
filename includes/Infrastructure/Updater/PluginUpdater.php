@@ -84,18 +84,31 @@ class PluginUpdater {
 			$this->github_repo
 		);
 
-		// Initialize the update checker using the namespaced factory
-		$this->update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
-			$github_url,
-			$this->plugin_file,
-			ZOHO_CONNECT_SERIALIZER_PLUGIN_BASENAME
-		);
+		try {
+			// Initialize the update checker using the namespaced factory
+			$this->update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+				$github_url,
+				$this->plugin_file,
+				ZOHO_CONNECT_SERIALIZER_PLUGIN_BASENAME
+			);
 
-		// Set to check for releases (tags)
-		$this->update_checker->getVcsApi()->enableReleaseAssets();
+			// Set to check for releases (tags) if VCS API is available
+			if ( method_exists( $this->update_checker, 'getVcsApi' ) ) {
+				$vcs_api = $this->update_checker->getVcsApi();
+				if ( $vcs_api && method_exists( $vcs_api, 'enableReleaseAssets' ) ) {
+					$vcs_api->enableReleaseAssets();
+				}
+			}
 
-		// Optional: Set branch (defaults to 'master' or 'main')
-		// $this->update_checker->setBranch('main');
+			// Optional: Set branch (defaults to 'master' or 'main')
+			// $this->update_checker->setBranch('main');
+		} catch ( \Exception $e ) {
+			// Silently fail - update checker not critical for plugin functionality
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( 'Zoho Connect Updater Error: ' . $e->getMessage() );
+			}
+			return;
+		}
 	}
 
 	/**
