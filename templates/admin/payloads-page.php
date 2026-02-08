@@ -278,7 +278,7 @@ $bookings = new \WP_Query( $args );
 				<tr>
 					<th><?php esc_html_e( 'Booking ID', 'crbs-zoho-flow-bridge' ); ?></th>
 					<th><?php esc_html_e( 'Title', 'crbs-zoho-flow-bridge' ); ?></th>
-					<th><?php esc_html_e( 'Sent At', 'crbs-zoho-flow-bridge' ); ?></th>
+					<th><?php esc_html_e( 'Processed At', 'crbs-zoho-flow-bridge' ); ?></th>
 					<th><?php esc_html_e( 'Actions', 'crbs-zoho-flow-bridge' ); ?></th>
 				</tr>
 			</thead>
