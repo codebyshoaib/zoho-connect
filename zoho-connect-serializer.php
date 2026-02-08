@@ -39,6 +39,11 @@ require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Activator.php';
 require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Core/Deactivator.php';
 
 /**
+ * Load updater class directly (needed before autoloader is registered)
+ */
+require_once ZOHO_CONNECT_SERIALIZER_PLUGIN_DIR . 'includes/Infrastructure/Updater/PluginUpdater.php';
+
+/**
  * Store updater instance globally to prevent garbage collection
  */
 $GLOBALS['zoho_connect_serializer_updater'] = null;

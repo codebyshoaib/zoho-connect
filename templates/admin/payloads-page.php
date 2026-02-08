@@ -100,7 +100,7 @@ if ( $booking_id > 0 ) {
 					}
 				}
 				?>
-				<div class="card" style="margin-top: 20px;">
+				<div class="card" style="margin-top: 20px; max-width: 100% !important;">
 					<h2><?php esc_html_e( 'Debug: Price Field Detection', 'crbs-zoho-flow-bridge' ); ?></h2>
 					<?php if ( ! empty( $price_candidates ) ) : ?>
 						<p><strong><?php esc_html_e( 'Possible price fields found:', 'crbs-zoho-flow-bridge' ); ?></strong></p>
@@ -163,21 +163,19 @@ $args = array(
 $bookings = new \WP_Query( $args );
 ?>
 
-<div class="wrap">
-	<h1><?php esc_html_e( 'View Payloads', 'crbs-zoho-flow-bridge' ); ?></h1>
-	
-	<p><?php esc_html_e( 'This page shows all bookings that have been processed and serialized.', 'crbs-zoho-flow-bridge' ); ?></p>
+<div class="wrap" style="max-width: 100%;">
+	<h1><?php esc_html_e( 'Your Recent Bookings', 'crbs-zoho-flow-bridge' ); ?></h1>
 
 	<?php
-	// Debug: Show recent bookings and their statuses
-	$debug_args = array(
+	// Get recent bookings
+	$recent_args = array(
 		'post_type'      => class_exists( 'CRBSBooking' ) ? ( new \CRBSBooking() )->getCPTName() : 'crbs_booking',
-		'posts_per_page' => 10,
+		'posts_per_page' => 20,
 		'orderby'         => 'date',
 		'order'           => 'DESC',
 		'post_status'     => 'publish',
 	);
-	$recent_bookings = new \WP_Query( $debug_args );
+	$recent_bookings = new \WP_Query( $recent_args );
 	
 	if ( $recent_bookings->have_posts() ) :
 		$status_names = array(
@@ -192,19 +190,15 @@ $bookings = new \WP_Query( $args );
 		);
 		$context = defined( 'PLUGIN_CRBS_CONTEXT' ) ? PLUGIN_CRBS_CONTEXT : 'crbs';
 		?>
-		<div class="card" style="margin-bottom: 20px;">
-			<h2><?php esc_html_e( 'Recent Bookings Debug Info', 'crbs-zoho-flow-bridge' ); ?></h2>
-			<p><em><?php esc_html_e( 'This shows recent bookings and why they may not be processed:', 'crbs-zoho-flow-bridge' ); ?></em></p>
-			<table class="wp-list-table widefat fixed striped">
+		<div class="card" style="margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 100% !important;">
+			<table class="wp-list-table widefat fixed striped" style="margin: 0;">
 				<thead>
 					<tr>
-						<th><?php esc_html_e( 'Booking ID', 'crbs-zoho-flow-bridge' ); ?></th>
-						<th><?php esc_html_e( 'Title', 'crbs-zoho-flow-bridge' ); ?></th>
-						<th><?php esc_html_e( 'Status ID', 'crbs-zoho-flow-bridge' ); ?></th>
-						<th><?php esc_html_e( 'Status Name', 'crbs-zoho-flow-bridge' ); ?></th>
-						<th><?php esc_html_e( 'Processed?', 'crbs-zoho-flow-bridge' ); ?></th>
-						<th><?php esc_html_e( 'Why Not?', 'crbs-zoho-flow-bridge' ); ?></th>
-						<th><?php esc_html_e( 'Action', 'crbs-zoho-flow-bridge' ); ?></th>
+						<th style="padding: 15px;"><?php esc_html_e( 'Booking ID', 'crbs-zoho-flow-bridge' ); ?></th>
+						<th style="padding: 15px;"><?php esc_html_e( 'Title', 'crbs-zoho-flow-bridge' ); ?></th>
+						<th style="padding: 15px;"><?php esc_html_e( 'Status', 'crbs-zoho-flow-bridge' ); ?></th>
+						<th style="padding: 15px;"><?php esc_html_e( 'Date', 'crbs-zoho-flow-bridge' ); ?></th>
+						<th style="padding: 15px; text-align: center;"><?php esc_html_e( 'Action', 'crbs-zoho-flow-bridge' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -226,52 +220,26 @@ $bookings = new \WP_Query( $args );
 							$status_name = $status_names[ $status_id ] ?? ( $status_id === 0 ? 'Not set / Unknown' : 'Unknown (' . $status_id . ')' );
 						}
 						
-						// Check if status is allowed (default: all statuses allowed, including 0)
-						$allowed_statuses = apply_filters( 'qzb_allowed_booking_statuses', array() );
-						$allow_all = apply_filters( 'qzb_allow_all_booking_statuses', true );
-						$status_allowed = $allow_all || empty( $allowed_statuses ) || in_array( $status_id, $allowed_statuses, true );
-						
-						$why_not = '';
-						if ( ! $processed ) {
-							if ( ! $status_allowed && ! empty( $allowed_statuses ) ) {
-								$why_not = sprintf( 
-									esc_html__( 'Status %d not in allowed list [%s]', 'crbs-zoho-flow-bridge' ),
-									$status_id,
-									implode( ', ', $allowed_statuses )
-								);
-							} else {
-								$why_not = esc_html__( 'Not processed yet (processing scheduled or in progress)', 'crbs-zoho-flow-bridge' );
-							}
-						}
+						$booking_date = get_the_date( 'Y-m-d H:i', $booking_id );
 						?>
 						<tr>
-							<td><?php echo esc_html( $booking_id ); ?></td>
-							<td><strong><?php echo esc_html( get_the_title() ); ?></strong></td>
-							<td><?php echo esc_html( $status_id ); ?></td>
-							<td><?php echo esc_html( $status_name ); ?></td>
-							<td>
-								<?php if ( $processed ) : ?>
-									<span style="color: green;">✓ <?php esc_html_e( 'Yes', 'crbs-zoho-flow-bridge' ); ?></span>
-								<?php else : ?>
-									<span style="color: red;">✗ <?php esc_html_e( 'No', 'crbs-zoho-flow-bridge' ); ?></span>
-								<?php endif; ?>
+							<td style="padding: 15px; font-weight: 600;"><?php echo esc_html( $booking_id ); ?></td>
+							<td style="padding: 15px;"><strong><?php echo esc_html( get_the_title() ); ?></strong></td>
+							<td style="padding: 15px;">
+								<span style="display: inline-block; padding: 4px 12px; border-radius: 12px; background: #f0f0f0; font-size: 13px;">
+									<?php echo esc_html( $status_name ); ?>
+								</span>
 							</td>
-							<td>
-								<?php if ( $why_not ) : ?>
-									<small style="color: #d63638;"><?php echo esc_html( $why_not ); ?></small>
-								<?php else : ?>
-									<span style="color: green;"><?php esc_html_e( 'Processed', 'crbs-zoho-flow-bridge' ); ?></span>
-								<?php endif; ?>
-							</td>
-							<td>
+							<td style="padding: 15px; color: #666;"><?php echo esc_html( $booking_date ); ?></td>
+							<td style="padding: 15px; text-align: center;">
 								<?php
 								$process_url = wp_nonce_url(
 									admin_url( 'admin.php?page=crbs-zoho-flow-bridge-payloads&process_booking=1&booking_id=' . $booking_id ),
 									'process_booking_' . $booking_id
 								);
 								?>
-								<a href="<?php echo esc_url( $process_url ); ?>" class="button button-small">
-									<?php esc_html_e( 'Process Now', 'crbs-zoho-flow-bridge' ); ?>
+								<a href="<?php echo esc_url( $process_url ); ?>" class="button button-primary" style="padding: 8px 20px; font-weight: 600; border-radius: 4px; text-decoration: none;">
+									<?php esc_html_e( 'Send Invoice', 'crbs-zoho-flow-bridge' ); ?>
 								</a>
 							</td>
 						</tr>
@@ -279,11 +247,10 @@ $bookings = new \WP_Query( $args );
 				</tbody>
 			</table>
 			<?php wp_reset_postdata(); ?>
-			<p style="margin-top: 15px;">
-				<strong><?php esc_html_e( 'Quick Fix:', 'crbs-zoho-flow-bridge' ); ?></strong>
-				<?php esc_html_e( 'To process ALL booking statuses (including Pending), add this to your theme\'s functions.php:', 'crbs-zoho-flow-bridge' ); ?>
-			</p>
-			<pre style="background: #f5f5f5; padding: 10px; border: 1px solid #ddd; margin: 10px 0;"><code>add_filter('qzb_allow_all_booking_statuses', '__return_true');</code></pre>
+		</div>
+	<?php else : ?>
+		<div class="notice notice-info">
+			<p><?php esc_html_e( 'No recent bookings found.', 'crbs-zoho-flow-bridge' ); ?></p>
 		</div>
 	<?php endif; ?>
 

@@ -123,22 +123,42 @@ class BookingService {
 			// Serialize CRBS booking for Zoho Flow
 			$serialized = $this->serialization_service->serialize_crbs_booking( $booking_id, $booking );
 
-			// For now, just output/debug (webhook sending will be enabled later)
+			// Output debug info
 			$debug_service = \ZohoConnectSerializer\Core\Plugin::get_instance()
 				->get_container()
 				->make( 'debug_service' );
 
 			$debug_service->output_payload( $serialized, $booking_id );
 
-			$this->logger->info( 'CRBS booking processed', array(
-				'booking_id' => $booking_id,
-				'payload_keys' => array_keys( $serialized ),
-			) );
+			// Send webhook to Zoho Flow
+			try {
+				$result = $this->webhook_service->send( $serialized );
+				
+				$this->logger->info( 'CRBS booking processed and sent to Zoho Flow', array(
+					'booking_id' => $booking_id,
+					'payload_keys' => array_keys( $serialized ),
+					'webhook_response' => $result,
+				) );
 
-			return array(
-				'success' => true,
-				'payload' => $serialized,
-			);
+				return array(
+					'success' => true,
+					'payload' => $serialized,
+					'webhook_result' => $result,
+				);
+			} catch ( \Exception $webhook_error ) {
+				// Log webhook error but still return success with payload
+				// This allows the payload to be stored even if webhook fails
+				$this->logger->error( 'Failed to send webhook for booking ' . $booking_id, array(
+					'booking_id' => $booking_id,
+					'error' => $webhook_error->getMessage(),
+				) );
+
+				return array(
+					'success' => true, // Still return success so payload is stored
+					'payload' => $serialized,
+					'webhook_error' => $webhook_error->getMessage(),
+				);
+			}
 
 		} catch ( \Exception $e ) {
 			$this->logger->error( 'Error processing CRBS booking ' . $booking_id, array(

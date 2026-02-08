@@ -184,7 +184,7 @@ class SerializationService {
 					array(
 						'name' => 'Car Rental Booking #' . $booking_id,
 						'qty'  => 1,
-						'rate' => $total,
+						'rate' => (string) $total,
 					),
 				),
 				'notes' => 'CRBS Booking #' . $booking_id,

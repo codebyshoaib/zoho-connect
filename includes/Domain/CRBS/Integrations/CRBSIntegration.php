@@ -37,6 +37,13 @@ class CRBSIntegration {
 	private $cpt_name = '';
 
 	/**
+	 * Pending bookings to process
+	 *
+	 * @var array
+	 */
+	private $pending_bookings = array();
+
+	/**
 	 * Constructor
 	 *
 	 * @param BookingService $booking_service Booking service instance
@@ -66,18 +73,20 @@ class CRBSIntegration {
 			return;
 		}
 
-		// Hook into CRBS booking save with lower priority to ensure CRBS has saved all meta
-		// Using priority 99 to run after CRBS has finished saving all data
-		add_action( "save_post_{$this->cpt_name}", array( $this, 'on_booking_saved' ), 99, 3 );
+		// Hook into CRBS booking save with very high priority to run AFTER CRBS has saved all meta
+		// Using priority 999 to ensure CRBS has completely finished saving all data
+		add_action( "save_post_{$this->cpt_name}", array( $this, 'on_booking_saved' ), 999, 3 );
 		
-		// Also hook into transition_post_status to catch status changes
-		add_action( "transition_post_status", array( $this, 'on_post_status_transition' ), 10, 3 );
+		// Also hook into transition_post_status to catch status changes (including new->publish)
+		// Use high priority to run after CRBS
+		add_action( "transition_post_status", array( $this, 'on_post_status_transition' ), 999, 3 );
 		
-		// Register scheduled event handler
-		add_action( 'qzb_process_booking', array( $this, 'process_scheduled_booking' ), 10, 1 );
+		// Hook into wp_insert_post_data to catch bookings as early as possible
+		add_filter( 'wp_insert_post_data', array( $this, 'on_wp_insert_post_data' ), 999, 2 );
 		
-		// Use shutdown hook as a fallback to process after everything is saved
-		add_action( 'shutdown', array( $this, 'process_pending_bookings' ), 10 );
+		// Use shutdown hook as final backup (runs after all other hooks)
+		// This gives CRBS maximum time to save all data
+		add_action( 'shutdown', array( $this, 'process_pending_bookings' ), 999 );
 
 		$this->logger->info( 'CRBS integration initialized', array(
 			'cpt_name' => $this->cpt_name,
@@ -105,30 +114,27 @@ class CRBSIntegration {
 			return;
 		}
 
-		if ( $post->post_status !== 'publish' ) {
-			$this->logger->debug( 'Post not published, skipping', array( 
-				'post_id' => $post_id,
-				'post_status' => $post->post_status,
-			) );
+		// Check if already processed (skip if already done)
+		$sent = get_post_meta( $post_id, '_qzb_sent_to_zoho', true );
+		if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) ) {
+			$this->logger->debug( 'Booking already processed, skipping', array( 'post_id' => $post_id ) );
 			return;
 		}
 
-		// Prevent duplicate sending - but allow processing new bookings
-		// Only skip if it was already processed AND this is an update (not a new booking)
-		$sent = get_post_meta( $post_id, '_qzb_sent_to_zoho', true );
-		if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) && $update ) {
-			// If it's an update and already processed, skip to avoid duplicates
-			$this->logger->debug( 'Booking already processed, skipping duplicate', array( 
-				'post_id' => $post_id,
-				'is_update' => $update,
-			) );
-			return;
-		}
-		// For new bookings ($update = false), always process even if meta exists
+		// ALWAYS try to process - don't check if it's "new" or not
+		// Just process any booking that hasn't been processed yet
+		// Process regardless of post status (draft, publish, etc.)
+		$this->logger->info( 'Booking save detected, attempting immediate processing', array( 
+			'post_id' => $post_id,
+			'post_status' => $post->post_status ?? 'unknown',
+			'is_update' => $update,
+		) );
 		
-		// Add to pending list to process on shutdown (after CRBS has saved everything)
+		// Add to pending list for shutdown processing (most reliable - runs after CRBS saves everything)
 		$this->pending_bookings[] = $post_id;
-		$this->logger->info( 'Added booking to pending list for shutdown processing', array( 'post_id' => $post_id ) );
+		
+		// Try to process immediately with retry loop (waits for data if needed)
+		$this->process_booking_directly( $post_id );
 	}
 
 	/**
@@ -139,30 +145,124 @@ class CRBSIntegration {
 	 * @param \WP_Post $post Post object
 	 */
 	public function on_post_status_transition( $new_status, $old_status, $post ) {
-		// Only process if transitioning to published and it's our CPT
-		if ( $new_status !== 'publish' || $post->post_type !== $this->cpt_name ) {
+		// Only process if it's our CPT
+		if ( $post->post_type !== $this->cpt_name ) {
 			return;
 		}
 
-		// Schedule processing with delay
-		$this->schedule_booking_processing( $post->ID );
+		// Process when transitioning to published (including new->publish for new bookings)
+		if ( $new_status === 'publish' ) {
+			// Check if already processed
+			$sent = get_post_meta( $post->ID, '_qzb_sent_to_zoho', true );
+			if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) ) {
+				$this->logger->debug( 'Booking already processed on status transition', array( 'post_id' => $post->ID ) );
+				return;
+			}
+
+			$this->logger->info( 'Booking status transitioned to publish, processing', array( 
+				'post_id' => $post->ID,
+				'old_status' => $old_status,
+				'new_status' => $new_status,
+			) );
+			
+			// Add to pending for shutdown (most reliable)
+			$this->pending_bookings[] = $post->ID;
+			
+			// Also try immediately
+			$this->process_booking_directly( $post->ID );
+		}
 	}
 
 	/**
-	 * Schedule booking processing with delay
+	 * Handle wp_insert_post_data filter to catch bookings early
+	 * This runs before the post is saved, so we can prepare
+	 *
+	 * @param array $data Post data
+	 * @param array $postarr Post array
+	 * @return array Unchanged post data
+	 */
+	public function on_wp_insert_post_data( $data, $postarr ) {
+		// Only process if it's our CPT
+		if ( isset( $data['post_type'] ) && $data['post_type'] === $this->cpt_name ) {
+			// This is just to log that we detected a booking being created
+			// Actual processing happens in save_post hook
+			$this->logger->debug( 'CRBS booking data detected in wp_insert_post_data', array(
+				'post_type' => $data['post_type'] ?? 'unknown',
+				'post_status' => $data['post_status'] ?? 'unknown',
+			) );
+		}
+		
+		return $data;
+	}
+
+	/**
+	 * Process booking directly and immediately (synchronous, no cron, no delays)
+	 * Retries in the same request until data is available or max retries reached
 	 *
 	 * @param int $post_id Post ID
+	 * @return bool True if processed, false if data not ready after retries
 	 */
-	private function schedule_booking_processing( $post_id ) {
-		// Use wp_schedule_single_event with a 3 second delay to ensure CRBS has saved all meta
-		if ( ! wp_next_scheduled( 'qzb_process_booking', array( $post_id ) ) ) {
-			wp_schedule_single_event( time() + 3, 'qzb_process_booking', array( $post_id ) );
-			$this->logger->info( 'Scheduled booking processing', array( 'post_id' => $post_id ) );
-			
-			// Trigger WordPress cron immediately if possible (for faster processing)
-			// This helps process bookings faster without waiting for the next cron run
-			spawn_cron();
+	private function process_booking_directly( $post_id ) {
+		// Check if already processed
+		$sent = get_post_meta( $post_id, '_qzb_sent_to_zoho', true );
+		if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) ) {
+			$this->logger->debug( 'Booking already processed, skipping', array( 'post_id' => $post_id ) );
+			return true;
 		}
+
+		// Check if CRBS is available
+		if ( ! class_exists( 'CRBSBooking' ) ) {
+			$this->logger->warning( 'CRBS not available', array( 'post_id' => $post_id ) );
+			return false;
+		}
+
+		$Booking = new \CRBSBooking();
+		
+		// Retry loop: try multiple times in the same request with small delays
+		// This ensures we wait for CRBS to finish saving all meta data
+		// Increased retries and delay to give CRBS more time
+		$max_retries = 20; // Increased from 10 to 20
+		$retry_delay_ms = 200; // Increased from 100ms to 200ms between retries
+		
+		for ( $attempt = 1; $attempt <= $max_retries; $attempt++ ) {
+			$booking = $Booking->getBooking( $post_id );
+			
+			// Check if booking data is available - be more lenient with the check
+			// Just check if we got an array back, even if meta is empty initially
+			if ( $booking && is_array( $booking ) ) {
+				// Ensure meta exists (even if empty)
+				if ( ! isset( $booking['meta'] ) ) {
+					$booking['meta'] = array();
+				}
+				
+				// Process it - don't require meta to be non-empty
+				// The serialization service will handle missing fields gracefully
+				$this->logger->info( 'Booking data loaded, processing immediately', array( 
+					'post_id' => $post_id,
+					'attempt' => $attempt,
+					'has_meta' => ! empty( $booking['meta'] ),
+				) );
+				$this->process_booking_immediately( $post_id, $booking );
+				return true;
+			}
+			
+			// Data not ready yet, wait a bit and retry
+			if ( $attempt < $max_retries ) {
+				usleep( $retry_delay_ms * 1000 ); // Convert ms to microseconds
+				$this->logger->debug( 'Booking data not available yet, retrying', array( 
+					'post_id' => $post_id,
+					'attempt' => $attempt,
+					'max_retries' => $max_retries,
+				) );
+			}
+		}
+		
+		// After all retries, data still not available
+		$this->logger->warning( 'Booking data not available after all retries', array( 
+			'post_id' => $post_id,
+			'max_retries' => $max_retries,
+		) );
+		return false;
 	}
 
 	/**
@@ -220,168 +320,30 @@ class CRBSIntegration {
 		}
 	}
 
-	/**
-	 * Process scheduled booking (called after delay)
-	 *
-	 * @param int $post_id Post ID
-	 */
-	public function process_scheduled_booking( $post_id ) {
-		$post = get_post( $post_id );
-		
-		if ( ! $post || $post->post_status !== 'publish' ) {
-			$this->logger->debug( 'Scheduled booking not published, skipping', array( 'post_id' => $post_id ) );
-			return;
-		}
-
-		// Check if already processed (unless forcing resend)
-		$sent = get_post_meta( $post_id, '_qzb_sent_to_zoho', true );
-		if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) ) {
-			$this->logger->debug( 'Scheduled booking already processed, skipping', array( 'post_id' => $post_id ) );
-			return;
-		}
-
-		// Load booking via CRBS
-		$Booking = new \CRBSBooking();
-		$booking = $Booking->getBooking( $post_id );
-
-		if ( ! $booking || ! is_array( $booking ) ) {
-			$this->logger->error( 'Could not load booking from CRBS (scheduled)', array( 
-				'post_id' => $post_id,
-			) );
-			return;
-		}
-
-		$this->logger->debug( 'Booking loaded from CRBS (scheduled)', array( 
-			'post_id' => $post_id,
-			'has_meta' => isset( $booking['meta'] ),
-			'meta_keys' => isset( $booking['meta'] ) ? array_keys( $booking['meta'] ) : array(),
-		) );
-
-		// Verify we have essential data before processing
-		$meta = $booking['meta'] ?? array();
-		$has_essential_data = ! empty( $meta['pickup_datetime'] ) || ! empty( $meta['price_initial_value'] ) || ! empty( $meta['vehicle_id'] );
-		
-		if ( ! $has_essential_data ) {
-			$this->logger->warning( 'Booking meta not fully loaded yet, retrying...', array( 
-				'post_id' => $post_id,
-				'meta_keys' => array_keys( $meta ),
-			) );
-			// Retry after another 2 seconds (max 2 retries)
-			$retry_count = get_post_meta( $post_id, '_qzb_retry_count', true );
-			$retry_count = (int) $retry_count;
-			if ( $retry_count < 2 ) {
-				update_post_meta( $post_id, '_qzb_retry_count', $retry_count + 1 );
-				if ( ! wp_next_scheduled( 'qzb_process_booking', array( $post_id ) ) ) {
-					wp_schedule_single_event( time() + 2, 'qzb_process_booking', array( $post_id ) );
-				}
-			} else {
-				$this->logger->error( 'Max retries reached, booking meta still not available', array( 'post_id' => $post_id ) );
-			}
-			return;
-		}
-
-		// Clear retry count on success
-		delete_post_meta( $post_id, '_qzb_retry_count' );
-
-		// Get booking status for logging
-		$context = defined( 'PLUGIN_CRBS_CONTEXT' ) ? PLUGIN_CRBS_CONTEXT : 'crbs';
-		$status_id = (int) ( $booking['meta'][ $context . '_booking_status_id' ] ?? $booking['meta']['booking_status_id'] ?? 0 );
-		
-		// Process ALL booking statuses by default (can be filtered if needed)
-		// 1 = Pending (new) ✓
-		// 2 = Processing (accepted) ✓
-		// 3 = Cancelled (rejected) ✓
-		// 4 = Completed (finished) ✓
-		// 5 = On hold ✓
-		// 6 = Refunded ✓
-		// 7 = Failed ✓
-		$allowed_statuses = apply_filters( 'qzb_allowed_booking_statuses', array() ); // Empty array = all statuses allowed
-		$allow_all_statuses = apply_filters( 'qzb_allow_all_booking_statuses', true ); // Default: process all statuses
-
-		$this->logger->info( 'Processing booking', array(
-			'post_id' => $post_id,
-			'status_id' => $status_id,
-			'status_name' => $this->get_status_name( $status_id ),
-			'allowed_statuses' => $allowed_statuses,
-			'allow_all' => $allow_all_statuses,
-		) );
-
-		// Only filter by status if explicitly configured via filter
-		if ( ! $allow_all_statuses && ! empty( $allowed_statuses ) && ! in_array( $status_id, $allowed_statuses, true ) ) {
-			$this->logger->debug( 'Booking status not in allowed list - SKIPPING', array(
-				'post_id' => $post_id,
-				'status_id' => $status_id,
-				'status_name' => $this->get_status_name( $status_id ),
-				'allowed_statuses' => $allowed_statuses,
-			) );
-			return;
-		}
-
-		// Process booking
-		$this->logger->info( 'Processing CRBS booking', array( 
-			'post_id' => $post_id,
-			'status_id' => $status_id,
-		) );
-
-		$result = $this->booking_service->process_crbs_booking( $post_id, $booking );
-
-		if ( $result['success'] ) {
-			// Store payload in multiple formats for compatibility
-			update_post_meta( $post_id, '_qzb_sent_to_zoho', '1' );
-			update_post_meta( $post_id, '_qzb_sent_at', current_time( 'mysql' ) );
-			update_post_meta( $post_id, '_qzb_payload_data', $result['payload'] );
-			update_post_meta( $post_id, '_qzb_payload_json', wp_json_encode( $result['payload'], JSON_PRETTY_PRINT ) );
-			
-			$this->logger->info( 'Booking processed and stored', array( 
-				'post_id' => $post_id,
-			) );
-		} else {
-			$this->logger->error( 'Failed to process booking', array( 
-				'post_id' => $post_id,
-				'error' => $result['error'] ?? 'Unknown error',
-			) );
-		}
-	}
 
 	/**
-	 * Process pending bookings on shutdown (after CRBS has saved everything)
+	 * Process pending bookings on shutdown (final attempt after all WordPress hooks)
+	 * This runs as the very last thing, giving CRBS maximum time to save all data
 	 */
 	public function process_pending_bookings() {
 		if ( empty( $this->pending_bookings ) ) {
 			return;
 		}
 
+		// Remove duplicates
+		$this->pending_bookings = array_unique( $this->pending_bookings );
+
 		foreach ( $this->pending_bookings as $post_id ) {
 			// Skip if already processed
 			$sent = get_post_meta( $post_id, '_qzb_sent_to_zoho', true );
 			if ( $sent === '1' && ! defined( 'QZB_FORCE_RESEND' ) ) {
+				$this->logger->debug( 'Booking already processed, skipping on shutdown', array( 'post_id' => $post_id ) );
 				continue;
 			}
 
-			$post = get_post( $post_id );
-			if ( ! $post || $post->post_status !== 'publish' ) {
-				continue;
-			}
-
-			// Load booking via CRBS
-			$Booking = new \CRBSBooking();
-			$booking = $Booking->getBooking( $post_id );
-
-			if ( ! $booking || ! is_array( $booking ) ) {
-				$this->logger->warning( 'Could not load booking on shutdown', array( 'post_id' => $post_id ) );
-				continue;
-			}
-
-			$meta = $booking['meta'] ?? array();
-			$has_essential_data = ! empty( $meta['pickup_datetime'] ) || ! empty( $meta['price_initial_value'] ) || ! empty( $meta['vehicle_id'] );
-
-			if ( $has_essential_data ) {
-				$this->logger->info( 'Processing booking on shutdown', array( 'post_id' => $post_id ) );
-				$this->process_booking_immediately( $post_id, $booking );
-			} else {
-				// Still not ready, schedule for later
-				$this->schedule_booking_processing( $post_id );
-			}
+			// Final attempt - process with retry loop
+			$this->logger->info( 'Final attempt: Processing booking on shutdown', array( 'post_id' => $post_id ) );
+			$this->process_booking_directly( $post_id );
 		}
 
 		// Clear pending list
