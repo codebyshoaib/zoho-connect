@@ -221,7 +221,28 @@ $bookings = new \WP_Query( $args );
 						}
 						
 						$booking_date = get_the_date( 'Y-m-d H:i', $booking_id );
+						
+						// Get payload - if not stored, generate it on-the-fly
 						$payload_json = get_post_meta( $booking_id, '_qzb_payload_json', true );
+						$payload_data = null;
+						
+						if ( empty( $payload_json ) && $booking && is_array( $booking ) ) {
+							// Generate payload on-the-fly for unprocessed bookings
+							try {
+								$plugin = \ZohoConnectSerializer\Core\Plugin::get_instance();
+								$container = $plugin->get_container();
+								$serialization_service = $container->make( 'serialization_service' );
+								
+								$payload_data = $serialization_service->serialize_crbs_booking( $booking_id, $booking );
+								$payload_json = wp_json_encode( $payload_data, JSON_PRETTY_PRINT );
+							} catch ( \Exception $e ) {
+								// If generation fails, payload_json will remain empty
+								$payload_json = '';
+							}
+						} else if ( ! empty( $payload_json ) ) {
+							// If stored as JSON string, decode it for consistency
+							$payload_data = json_decode( $payload_json, true );
+						}
 						?>
 						<tr>
 							<td style="padding: 15px; font-weight: 600;"><?php echo esc_html( $booking_id ); ?></td>
@@ -247,7 +268,7 @@ $bookings = new \WP_Query( $args );
 										type="button" 
 										class="button view-payload-btn" 
 										data-booking-id="<?php echo esc_attr( $booking_id ); ?>"
-										data-payload='<?php echo esc_attr( wp_json_encode( $payload_json ) ); ?>'
+										data-payload="<?php echo ! empty( $payload_json ) ? esc_attr( base64_encode( $payload_json ) ) : ''; ?>"
 										style="padding: 8px 12px; border-radius: 4px; cursor: pointer; background: #2271b1; color: #fff; border: 1px solid #2271b1;"
 										title="<?php esc_attr_e( 'View Payload', 'crbs-zoho-flow-bridge' ); ?>"
 									>
@@ -367,12 +388,27 @@ $bookings = new \WP_Query( $args );
 	const copyPayloadBtn = document.getElementById('copy-payload-btn');
 	let currentPayload = '';
 
+	// Decode base64 string
+	function decodeBase64(str) {
+		try {
+			return decodeURIComponent(escape(atob(str)));
+		} catch (e) {
+			return str;
+		}
+	}
+
 	// Open modal when eye button is clicked
 	document.addEventListener('click', function(e) {
 		if (e.target.closest('.view-payload-btn')) {
 			const btn = e.target.closest('.view-payload-btn');
 			const bookingId = btn.getAttribute('data-booking-id');
-			const payload = btn.getAttribute('data-payload');
+			const payloadEncoded = btn.getAttribute('data-payload');
+			
+			// Decode base64 payload
+			let payload = '';
+			if (payloadEncoded && payloadEncoded !== 'null' && payloadEncoded !== '') {
+				payload = decodeBase64(payloadEncoded);
+			}
 			
 			currentPayload = payload;
 			modalBookingId.textContent = '# ' + bookingId;
@@ -426,6 +462,7 @@ $bookings = new \WP_Query( $args );
 	copyPayloadBtn.addEventListener('click', function() {
 		if (currentPayload) {
 			try {
+				// Try to parse and format as JSON
 				const payloadObj = JSON.parse(currentPayload);
 				const formattedJson = JSON.stringify(payloadObj, null, 2);
 				navigator.clipboard.writeText(formattedJson).then(function() {
@@ -435,6 +472,7 @@ $bookings = new \WP_Query( $args );
 					alert('<?php esc_html_e( 'Failed to copy to clipboard.', 'crbs-zoho-flow-bridge' ); ?>');
 				});
 			} catch (e) {
+				// If not valid JSON, copy as-is
 				navigator.clipboard.writeText(currentPayload).then(function() {
 					alert('<?php esc_html_e( 'Data copied to clipboard!', 'crbs-zoho-flow-bridge' ); ?>');
 				}).catch(function(err) {
