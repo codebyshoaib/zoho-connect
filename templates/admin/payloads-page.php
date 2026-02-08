@@ -221,6 +221,7 @@ $bookings = new \WP_Query( $args );
 						}
 						
 						$booking_date = get_the_date( 'Y-m-d H:i', $booking_id );
+						$payload_json = get_post_meta( $booking_id, '_qzb_payload_json', true );
 						?>
 						<tr>
 							<td style="padding: 15px; font-weight: 600;"><?php echo esc_html( $booking_id ); ?></td>
@@ -232,15 +233,27 @@ $bookings = new \WP_Query( $args );
 							</td>
 							<td style="padding: 15px; color: #666;"><?php echo esc_html( $booking_date ); ?></td>
 							<td style="padding: 15px; text-align: center;">
-								<?php
-								$process_url = wp_nonce_url(
-									admin_url( 'admin.php?page=crbs-zoho-flow-bridge-payloads&process_booking=1&booking_id=' . $booking_id ),
-									'process_booking_' . $booking_id
-								);
-								?>
-								<a href="<?php echo esc_url( $process_url ); ?>" class="button button-primary" style="padding: 8px 20px; font-weight: 600; border-radius: 4px; text-decoration: none;">
-									<?php esc_html_e( 'Send Invoice', 'crbs-zoho-flow-bridge' ); ?>
-								</a>
+								<div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+									<?php
+									$process_url = wp_nonce_url(
+										admin_url( 'admin.php?page=crbs-zoho-flow-bridge-payloads&process_booking=1&booking_id=' . $booking_id ),
+										'process_booking_' . $booking_id
+									);
+									?>
+									<a href="<?php echo esc_url( $process_url ); ?>" class="button button-primary" style="padding: 8px 20px; font-weight: 600; border-radius: 4px; text-decoration: none;">
+										<?php esc_html_e( 'Send Invoice', 'crbs-zoho-flow-bridge' ); ?>
+									</a>
+									<button 
+										type="button" 
+										class="button view-payload-btn" 
+										data-booking-id="<?php echo esc_attr( $booking_id ); ?>"
+										data-payload='<?php echo esc_attr( wp_json_encode( $payload_json ) ); ?>'
+										style="padding: 8px 12px; border-radius: 4px; cursor: pointer; background: #2271b1; color: #fff; border: 1px solid #2271b1;"
+										title="<?php esc_attr_e( 'View Payload', 'crbs-zoho-flow-bridge' ); ?>"
+									>
+										<span class="dashicons dashicons-visibility" style="font-size: 16px; line-height: 1.2;"></span>
+									</button>
+								</div>
 							</td>
 						</tr>
 					<?php endwhile; ?>
@@ -291,3 +304,157 @@ $bookings = new \WP_Query( $args );
 		<?php wp_reset_postdata(); ?>
 	<?php endif; ?>
 </div>
+
+<!-- Modal for viewing payload data -->
+<div id="payload-modal" style="display: none; position: fixed; z-index: 100000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5);">
+	<div style="background-color: #fefefe; margin: 5% auto; padding: 0; border: 1px solid #888; width: 90%; max-width: 900px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-height: 85vh; display: flex; flex-direction: column;">
+		<div style="padding: 20px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; background: #f9f9f9; border-radius: 4px 4px 0 0;">
+			<h2 style="margin: 0; font-size: 20px; color: #23282d;">
+				<?php esc_html_e( 'Booking Payload Data', 'crbs-zoho-flow-bridge' ); ?>
+				<span id="modal-booking-id" style="color: #666; font-weight: normal; font-size: 16px;"></span>
+			</h2>
+			<button type="button" id="close-modal" style="background: transparent; border: none; font-size: 28px; font-weight: bold; color: #aaa; cursor: pointer; padding: 0; width: 30px; height: 30px; line-height: 1; border-radius: 3px; transition: all 0.2s;" onmouseover="this.style.color='#000'; this.style.background='#f0f0f0';" onmouseout="this.style.color='#aaa'; this.style.background='transparent';">
+				&times;
+			</button>
+		</div>
+		<div style="padding: 20px; overflow-y: auto; flex: 1;">
+			<div id="modal-content">
+				<p style="color: #666;"><?php esc_html_e( 'Loading...', 'crbs-zoho-flow-bridge' ); ?></p>
+			</div>
+		</div>
+		<div style="padding: 15px 20px; border-top: 1px solid #ddd; background: #f9f9f9; border-radius: 0 0 4px 4px; display: flex; justify-content: flex-end; gap: 10px;">
+			<button type="button" id="copy-payload-btn" class="button button-secondary" style="display: none;">
+				<?php esc_html_e( 'Copy JSON', 'crbs-zoho-flow-bridge' ); ?>
+			</button>
+			<button type="button" id="close-modal-btn" class="button button-primary">
+				<?php esc_html_e( 'Close', 'crbs-zoho-flow-bridge' ); ?>
+			</button>
+		</div>
+	</div>
+</div>
+
+<style>
+	.view-payload-btn:hover {
+		background: #135e96 !important;
+		border-color: #135e96 !important;
+	}
+	.view-payload-btn:active {
+		background: #0a4b78 !important;
+		border-color: #0a4b78 !important;
+	}
+	#payload-modal pre {
+		background: #f5f5f5;
+		padding: 15px;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		overflow-x: auto;
+		margin: 0;
+		font-size: 13px;
+		line-height: 1.5;
+	}
+	#payload-modal code {
+		font-family: 'Courier New', Courier, monospace;
+	}
+</style>
+
+<script>
+(function() {
+	const modal = document.getElementById('payload-modal');
+	const modalContent = document.getElementById('modal-content');
+	const modalBookingId = document.getElementById('modal-booking-id');
+	const closeModal = document.getElementById('close-modal');
+	const closeModalBtn = document.getElementById('close-modal-btn');
+	const copyPayloadBtn = document.getElementById('copy-payload-btn');
+	let currentPayload = '';
+
+	// Open modal when eye button is clicked
+	document.addEventListener('click', function(e) {
+		if (e.target.closest('.view-payload-btn')) {
+			const btn = e.target.closest('.view-payload-btn');
+			const bookingId = btn.getAttribute('data-booking-id');
+			const payload = btn.getAttribute('data-payload');
+			
+			currentPayload = payload;
+			modalBookingId.textContent = '# ' + bookingId;
+			
+			if (payload && payload !== 'null' && payload !== '') {
+				try {
+					const payloadObj = JSON.parse(payload);
+					const formattedJson = JSON.stringify(payloadObj, null, 2);
+					modalContent.innerHTML = '<pre><code>' + escapeHtml(formattedJson) + '</code></pre>';
+					copyPayloadBtn.style.display = 'inline-block';
+				} catch (e) {
+					modalContent.innerHTML = '<pre><code>' + escapeHtml(payload) + '</code></pre>';
+					copyPayloadBtn.style.display = 'inline-block';
+				}
+			} else {
+				modalContent.innerHTML = '<p style="color: #d63638;"><?php esc_html_e( 'No payload data found for this booking.', 'crbs-zoho-flow-bridge' ); ?></p>';
+				copyPayloadBtn.style.display = 'none';
+			}
+			
+			modal.style.display = 'block';
+			document.body.style.overflow = 'hidden';
+		}
+	});
+
+	// Close modal functions
+	function closeModalFunc() {
+		modal.style.display = 'none';
+		document.body.style.overflow = '';
+		modalContent.innerHTML = '<p style="color: #666;"><?php esc_html_e( 'Loading...', 'crbs-zoho-flow-bridge' ); ?></p>';
+		currentPayload = '';
+	}
+
+	closeModal.addEventListener('click', closeModalFunc);
+	closeModalBtn.addEventListener('click', closeModalFunc);
+
+	// Close modal when clicking outside
+	modal.addEventListener('click', function(e) {
+		if (e.target === modal) {
+			closeModalFunc();
+		}
+	});
+
+	// Close modal with Escape key
+	document.addEventListener('keydown', function(e) {
+		if (e.key === 'Escape' && modal.style.display === 'block') {
+			closeModalFunc();
+		}
+	});
+
+	// Copy payload to clipboard
+	copyPayloadBtn.addEventListener('click', function() {
+		if (currentPayload) {
+			try {
+				const payloadObj = JSON.parse(currentPayload);
+				const formattedJson = JSON.stringify(payloadObj, null, 2);
+				navigator.clipboard.writeText(formattedJson).then(function() {
+					alert('<?php esc_html_e( 'JSON copied to clipboard!', 'crbs-zoho-flow-bridge' ); ?>');
+				}).catch(function(err) {
+					console.error('Failed to copy:', err);
+					alert('<?php esc_html_e( 'Failed to copy to clipboard.', 'crbs-zoho-flow-bridge' ); ?>');
+				});
+			} catch (e) {
+				navigator.clipboard.writeText(currentPayload).then(function() {
+					alert('<?php esc_html_e( 'Data copied to clipboard!', 'crbs-zoho-flow-bridge' ); ?>');
+				}).catch(function(err) {
+					console.error('Failed to copy:', err);
+					alert('<?php esc_html_e( 'Failed to copy to clipboard.', 'crbs-zoho-flow-bridge' ); ?>');
+				});
+			}
+		}
+	});
+
+	// Escape HTML function
+	function escapeHtml(text) {
+		const map = {
+			'&': '&amp;',
+			'<': '&lt;',
+			'>': '&gt;',
+			'"': '&quot;',
+			"'": '&#039;'
+		};
+		return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+	}
+})();
+</script>
