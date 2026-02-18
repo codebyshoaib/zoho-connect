@@ -153,6 +153,23 @@ class SerializationService {
 			?? $meta['status_id'] 
 			?? 0 );
 
+		// Handle zero rate case - Zoho Books rejects 0 rates
+		// If rate is 0, set a minimum value to avoid API errors
+		if ( $total == 0 ) {
+			$this->logger->warning( 'Booking has zero rate, setting minimum value to avoid Zoho Books API error', array(
+				'booking_id' => $booking_id,
+				'original_rate' => 0,
+			) );
+			$total = 0.01; // Set minimum value to avoid "Invalid value passed for Rate" error
+		}
+
+		// Build line item
+		$line_item = array(
+			'name' => 'Car Rental Booking #' . $booking_id,
+			'qty'  => 1,
+			'rate' => (string) $total,
+		);
+
 		// Build payload
 		$payload = array(
 			'event'    => 'crbs.booking.created',
@@ -181,11 +198,7 @@ class SerializationService {
 			'invoice' => array(
 				'currency' => $currency,
 				'line_items' => array(
-					array(
-						'name' => 'Car Rental Booking #' . $booking_id,
-						'qty'  => 1,
-						'rate' => (string) $total,
-					),
+					$line_item,
 				),
 				'notes' => 'CRBS Booking #' . $booking_id,
 			),
