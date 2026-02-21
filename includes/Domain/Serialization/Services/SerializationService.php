@@ -164,11 +164,20 @@ class SerializationService {
 		}
 
 		// Build line item
+		// Note: rate and qty must be numbers (not strings) for Zoho Books API
+		// line_items is an array to support multiple items (e.g., booking + addons)
+		// In Zoho Flow, access first item with: line_items[0].rate, line_items[0].qty, line_items[0].name
 		$line_item = array(
 			'name' => 'Car Rental Booking #' . $booking_id,
-			'qty'  => 1,
-			'rate' => (string) $total,
+			'qty'  => (int) 1,
+			'rate' => (float) $total,
 		);
+
+		// Build line items array - supports multiple items
+		$line_items = array( $line_item );
+
+		// Allow filtering to add additional line items (e.g., insurance addons)
+		$line_items = apply_filters( 'qzb_line_items', $line_items, $booking_id, $booking, $meta );
 
 		// Build payload
 		$payload = array(
@@ -197,9 +206,7 @@ class SerializationService {
 
 			'invoice' => array(
 				'currency' => $currency,
-				'line_items' => array(
-					$line_item,
-				),
+				'line_items' => $line_items, // Array of line items - properly formatted as JSON array
 				'notes' => 'CRBS Booking #' . $booking_id,
 			),
 		);
