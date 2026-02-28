@@ -91,6 +91,39 @@ class SerializationService {
 		$vehicle_id = $meta['vehicle_id'] ?? '';
 		$vehicle_name = $meta['vehicle_name'] ?? '';
 
+		// Get Zoho Books item ID from vehicle ACF field
+		$zoho_item_id = '';
+		if ( ! empty( $vehicle_id ) ) {
+			// Check if ACF is available
+			if ( function_exists( 'get_field' ) ) {
+				$zoho_item_id = get_field( 'zoho_item_id', $vehicle_id );
+				// ACF might return array or string, normalize to string
+				if ( is_array( $zoho_item_id ) ) {
+					$zoho_item_id = isset( $zoho_item_id['value'] ) ? $zoho_item_id['value'] : '';
+				}
+				$zoho_item_id = trim( (string) $zoho_item_id );
+				
+				if ( empty( $zoho_item_id ) ) {
+					$this->logger->warning( 'Vehicle has no Zoho Books item ID configured', array(
+						'booking_id' => $booking_id,
+						'vehicle_id' => $vehicle_id,
+						'vehicle_name' => $vehicle_name,
+					) );
+				} else {
+					$this->logger->debug( 'Found Zoho Books item ID from vehicle ACF field', array(
+						'booking_id' => $booking_id,
+						'vehicle_id' => $vehicle_id,
+						'zoho_item_id' => $zoho_item_id,
+					) );
+				}
+			} else {
+				$this->logger->warning( 'ACF function get_field not available', array(
+					'booking_id' => $booking_id,
+					'vehicle_id' => $vehicle_id,
+				) );
+			}
+		}
+
 		// Extract location information
 		$pickup_location_name = $meta['pickup_location_name'] ?? '';
 		$return_location_name = $meta['return_location_name'] ?? '';
@@ -172,6 +205,11 @@ class SerializationService {
 			'qty'  => (int) 1,
 			'rate' => (float) $total,
 		);
+
+		// Add Zoho Books item ID if available (for template mapping)
+		if ( ! empty( $zoho_item_id ) ) {
+			$line_item['item_id'] = $zoho_item_id;
+		}
 
 		// Build line items array - supports multiple items
 		$line_items = array( $line_item );
