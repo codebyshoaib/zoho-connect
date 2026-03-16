@@ -135,47 +135,226 @@ class SerializationService {
 			?? $meta['currency'] 
 			?? 'USD';
 		
-		// Price: price_initial_value is the main booking price in CRBS
-		$total = (float) ( $meta['price_initial_value'] ?? 0 );
+		// Price: Get TOTAL booking amount (rate * days), not just per-day rate
+		// Priority 1: Look for total amount fields (CRBS may have calculated total already)
+		$total_keys = array(
+			$context . '_payment_total',
+			'payment_total',
+			$context . '_total',
+			'total',
+			$context . '_booking_total',
+			'booking_total',
+			$context . '_rental_total',
+			'rental_total',
+			$context . '_invoice_total',
+			'invoice_total',
+			$context . '_price_initial_value',
+			'price_initial_value',
+		);
 		
-		// If price_initial_value is 0, try other price fields as fallback
+		$total = 0;
+		$found_key = '';
+		$per_day_rate = 0;
+		
+		// First, try to find total amount fields
+		foreach ( $total_keys as $key ) {
+			if ( isset( $meta[ $key ] ) && ! empty( $meta[ $key ] ) ) {
+				$value = (float) $meta[ $key ];
+				// Only use if value is greater than 0.01 (ignore 0, 0.01, etc.)
+				if ( $value > 0.01 ) {
+					$total = $value;
+					$found_key = $key;
+					break;
+				}
+			}
+		}
+		
+		// Priority 2: If no total found, get per-day rate and calculate total from dates
 		if ( $total == 0 ) {
-			$price_keys = array(
-				$context . '_payment_total',
-				'payment_total',
-				$context . '_total',
-				'total',
+			// Get per-day rate
+			$per_day_keys = array(
+				'price_rental_day_value',
+				$context . '_price_rental_day_value',
 				$context . '_price',
 				'price',
+			);
+			
+			foreach ( $per_day_keys as $key ) {
+				if ( isset( $meta[ $key ] ) && ! empty( $meta[ $key ] ) ) {
+					$value = (float) $meta[ $key ];
+					if ( $value > 0.01 ) {
+						$per_day_rate = $value;
+						break;
+					}
+				}
+			}
+			
+			// Calculate days from pickup and return dates
+			if ( $per_day_rate > 0 && ! empty( $pickup ) && ! empty( $return ) ) {
+				$days = $this->calculate_rental_days( $pickup, $return );
+				if ( $days > 0 ) {
+					$total = $per_day_rate * $days;
+					$found_key = 'calculated_from_dates';
+					$this->logger->debug( 'Calculated total from per-day rate and dates', array(
+						'booking_id' => $booking_id,
+						'per_day_rate' => $per_day_rate,
+						'days' => $days,
+						'total' => $total,
+					) );
+				}
+			}
+		}
+		
+		// Priority 3: Fallback to other price fields if still not found
+		if ( $total == 0 ) {
+			$fallback_keys = array(
 				$context . '_amount',
 				'amount',
 				$context . '_cost',
 				'cost',
 				$context . '_sum',
 				'sum',
-				$context . '_booking_total',
-				'booking_total',
-				$context . '_rental_total',
-				'rental_total',
-				$context . '_invoice_total',
-				'invoice_total',
 			);
 			
-			foreach ( $price_keys as $key ) {
+			foreach ( $fallback_keys as $key ) {
 				if ( isset( $meta[ $key ] ) && ! empty( $meta[ $key ] ) ) {
-					$total = (float) $meta[ $key ];
-					$this->logger->debug( 'Found price in fallback meta key', array(
-						'booking_id' => $booking_id,
-						'key' => $key,
-						'value' => $total,
-					) );
+					$value = (float) $meta[ $key ];
+					if ( $value > 0.01 ) {
+						$total = $value;
+						$found_key = $key;
+						break;
+					}
+				}
+			}
+		}
+		
+		// If not found in known fields, scan ALL meta fields for numeric values that look like prices
+		if ( $total == 0 ) {
+			$price_keywords = array( 'price', 'total', 'amount', 'cost', 'sum', 'payment', 'fee', 'charge', 'rental', 'value' );
+			
+			// Search in meta first
+			foreach ( $meta as $key => $value ) {
+				// Handle string values that might be numeric
+				if ( is_string( $value ) ) {
+					$value = trim( $value );
+					if ( empty( $value ) || ! is_numeric( $value ) ) {
+						continue;
+					}
+				}
+				
+				// Skip non-numeric or empty values
+				if ( empty( $value ) || ! is_numeric( $value ) ) {
+					continue;
+				}
+				
+				$value_float = (float) $value;
+				
+				// Look for values between 1 and 1,000,000 (reasonable price range)
+				// AND check if key contains price-related keywords
+				$key_lower = strtolower( $key );
+				$has_price_keyword = false;
+				
+				foreach ( $price_keywords as $keyword ) {
+					if ( strpos( $key_lower, $keyword ) !== false ) {
+						$has_price_keyword = true;
+						break;
+					}
+				}
+				
+				// If it has price keyword AND is in reasonable range, use it
+				if ( $has_price_keyword && $value_float >= 1 && $value_float <= 1000000 ) {
+					$total = $value_float;
+					$found_key = $key;
 					break;
 				}
 			}
-		} else {
-			$this->logger->debug( 'Found price in price_initial_value', array(
+			
+			// If still not found, try ANY numeric value in reasonable range (last resort)
+			if ( $total == 0 ) {
+				foreach ( $meta as $key => $value ) {
+					// Handle string values that might be numeric
+					if ( is_string( $value ) ) {
+						$value = trim( $value );
+						if ( empty( $value ) || ! is_numeric( $value ) ) {
+							continue;
+						}
+					}
+					
+					if ( empty( $value ) || ! is_numeric( $value ) ) {
+						continue;
+					}
+					
+					$value_float = (float) $value;
+					
+					// Use any value between 100 and 1,000,000 (likely a price, not an ID)
+					if ( $value_float >= 100 && $value_float <= 1000000 ) {
+						$total = $value_float;
+						$found_key = $key;
+						break;
+					}
+				}
+			}
+			
+			// Last resort: check booking array root level (not just meta)
+			if ( $total == 0 ) {
+				foreach ( $booking as $key => $value ) {
+					// Skip meta (already checked) and non-numeric values
+					if ( $key === 'meta' || empty( $value ) || ! is_numeric( $value ) ) {
+						continue;
+					}
+					
+					$value_float = (float) $value;
+					$key_lower = strtolower( $key );
+					
+					// Check for price-related keywords in root level
+					foreach ( $price_keywords as $keyword ) {
+						if ( strpos( $key_lower, $keyword ) !== false && $value_float >= 1 && $value_float <= 1000000 ) {
+							$total = $value_float;
+							$found_key = $key . ' (root)';
+							break 2;
+						}
+					}
+				}
+			}
+		}
+		
+		// Get per-day rate for debug info (if not already set)
+		if ( $per_day_rate == 0 ) {
+			$per_day_keys = array(
+				'price_rental_day_value',
+				$context . '_price_rental_day_value',
+			);
+			foreach ( $per_day_keys as $key ) {
+				if ( isset( $meta[ $key ] ) && ! empty( $meta[ $key ] ) ) {
+					$value = (float) $meta[ $key ];
+					if ( $value > 0.01 ) {
+						$per_day_rate = $value;
+						break;
+					}
+				}
+			}
+		}
+		
+		// Calculate days for debug info
+		$rental_days = 0;
+		if ( ! empty( $pickup ) && ! empty( $return ) ) {
+			$rental_days = $this->calculate_rental_days( $pickup, $return );
+		}
+		
+		if ( $total > 0 ) {
+			$this->logger->debug( 'Found total booking amount', array(
 				'booking_id' => $booking_id,
-				'value' => $total,
+				'key' => $found_key,
+				'total' => $total,
+				'per_day_rate' => $per_day_rate,
+				'rental_days' => $rental_days,
+			) );
+		} else {
+			$this->logger->warning( 'No valid total amount found in booking meta', array(
+				'booking_id' => $booking_id,
+				'per_day_rate' => $per_day_rate,
+				'rental_days' => $rental_days,
+				'available_keys' => array_keys( $meta ),
 			) );
 		}
 		
@@ -202,8 +381,8 @@ class SerializationService {
 		// In Zoho Flow, access first item with: line_items[0].rate, line_items[0].qty, line_items[0].name
 		$line_item = array(
 			'name' => 'Car Rental Booking #' . $booking_id,
-			'qty'  => (int) 1,
-			'rate' => (float) $total,
+			'qty'  => $rental_days > 0 ? (int) $rental_days : 1,
+			'rate' => $rental_days > 0 ? (float) $per_day_rate : (float) $total,
 		);
 
 		// Add Zoho Books item ID if available (for template mapping)
@@ -246,6 +425,15 @@ class SerializationService {
 				'currency' => $currency,
 				'line_items' => $line_items, // Array of line items - properly formatted as JSON array
 				'notes' => 'CRBS Booking #' . $booking_id,
+				// Debug info: show which field was used for total and calculation details
+				'_debug' => array(
+					'total_field' => $found_key ?: 'not_found',
+					'total_amount' => $total,
+					'per_day_rate' => $per_day_rate,
+					'rental_days' => $rental_days,
+					'pickup_date' => $pickup,
+					'return_date' => $return,
+				),
 			),
 		);
 
@@ -258,6 +446,78 @@ class SerializationService {
 		) );
 
 		return $payload;
+	}
+
+	/**
+	 * Calculate rental days from pickup and return dates
+	 *
+	 * @param string $pickup_date Pickup date/datetime
+	 * @param string $return_date Return date/datetime
+	 * @return float Number of rental days (can be fractional for partial days)
+	 */
+	private function calculate_rental_days( $pickup_date, $return_date ) {
+		if ( empty( $pickup_date ) || empty( $return_date ) ) {
+			return 0;
+		}
+		
+		// Try to parse dates - CRBS uses various formats
+		$pickup_timestamp = $this->parse_date( $pickup_date );
+		$return_timestamp = $this->parse_date( $return_date );
+		
+		if ( ! $pickup_timestamp || ! $return_timestamp ) {
+			return 0;
+		}
+		
+		// Calculate difference in seconds
+		$diff_seconds = $return_timestamp - $pickup_timestamp;
+		
+		// Convert to days (including fractional days)
+		$days = $diff_seconds / ( 24 * 60 * 60 );
+		
+		// Always ceil to full days (partial days count as a full day)
+		return (int) ceil( $days );
+	}
+	
+	/**
+	 * Parse date string to timestamp
+	 * Handles various CRBS date formats
+	 *
+	 * @param string $date_string Date string in various formats
+	 * @return int|false Unix timestamp or false on failure
+	 */
+	private function parse_date( $date_string ) {
+		if ( empty( $date_string ) ) {
+			return false;
+		}
+		
+		// Try common CRBS date formats
+		// Format 1: "04-03-2026 01:00" (DD-MM-YYYY HH:MM)
+		// Format 2: "2026-03-04 01:00" (YYYY-MM-DD HH:MM)
+		// Format 3: "04-03-2026" (DD-MM-YYYY)
+		// Format 4: "2026-03-04" (YYYY-MM-DD)
+		
+		// Try strtotime first (handles most formats)
+		$timestamp = strtotime( $date_string );
+		if ( $timestamp !== false ) {
+			return $timestamp;
+		}
+		
+		// Try parsing DD-MM-YYYY format manually
+		if ( preg_match( '/^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2}))?$/', $date_string, $matches ) ) {
+			$day = $matches[1];
+			$month = $matches[2];
+			$year = $matches[3];
+			$hour = isset( $matches[4] ) ? $matches[4] : '00';
+			$minute = isset( $matches[5] ) ? $matches[5] : '00';
+			
+			$date_string = "$year-$month-$day $hour:$minute:00";
+			$timestamp = strtotime( $date_string );
+			if ( $timestamp !== false ) {
+				return $timestamp;
+			}
+		}
+		
+		return false;
 	}
 
 	/**
